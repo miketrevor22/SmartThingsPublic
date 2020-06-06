@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "04.06.03"
+    return "04.07.00"
 }
 
 /*
@@ -29,6 +29,11 @@ def clientVersion() {
 * Works with all Z-Wave Locks including Schlage, Yale, Kiwkset, Monoprice, DanaLock, IDLock, Samsung, KeyWe, Delaney, Popp and August
 *
 * Change Log
+* 2020-06-05 - (v04.07.00) Fix bugs with stock DTH associations and also fix for FE599/BE369 associations starting hub firmware 0.31.x
+* 2020-04-06 - (v04.06.07) Handle FE599 lock busy reports, enable motor load control for Kwikset, additional report handling
+* 2020-02-27 - (v04.06.06) Handle multiple hub installations and component rule actions better
+* 2020-02-06 - (v04.06.05) Update device health
+* 2020-02-04 - (v04.06.04) Added Kiwkset 913
 * 2020-01-31 - (v04.06.03) Get battery level if batteries are replaced
 * 2020-01-21 - (v04.06.02) Fix for broken ST Android Classic app 2.18, fix for IDLock reading users on new pairing
 * 2019-11-12 - (v04.06.00) Contact sensor for locks which show up a separate device now
@@ -235,6 +240,7 @@ metadata {
         
         fingerprint mfr:"0090", prod:"0001", model:"0642", deviceJoinName:"Kwikset 916 Z-Wave Lock"
         fingerprint mfr:"0090", prod:"0001", model:"0436", deviceJoinName:"Kwikset 914 Z-Wave Lock"
+        fingerprint mfr:"0090", prod:"0003", model:"0845", deviceJoinName:"Kwikset 913 Z-Wave Plus lock" // zw:Fs type:4003 mfr:0090 prod:0003 model:0845 ver:4.10 zwv:4.34 lib:03 cc:5E,72,98 sec:86,5D role:07 ff:8300 ui:8300
         fingerprint mfr:"0090", prod:"0001", model:"0336", deviceJoinName:"Kwikset 912 Z-Wave Lock"
         fingerprint mfr:"0090", prod:"0001", model:"0236", deviceJoinName:"Kwikset 910 Z-Wave Lock"
 		fingerprint mfr:"0090", prod:"0003", model:"0742", deviceJoinName: "Kwikset Obsidian Lock" // zw:Fs type:4003 mfr:0090 prod:0003 model:0742 ver:4.10 zwv:4.34 lib:03 cc:5E,72,5A,98,73,7A sec:86,80,62,63,85,59,71,70,4E,8B,4C,5D role:07 ff:8300 ui:8300, KWIKSET OBSIDIAN 954
@@ -243,7 +249,7 @@ metadata {
         fingerprint mfr:"0090", prod:"0003", deviceJoinName:"Vivint (Kwikset) Z-Wave lock" // Kwikset Vivint Generic Z-Wave, model:"0003"
         fingerprint mfr:"0090", prod:"0003", model:"0541", deviceJoinName:"KwikSet SmartCode 888 Touchpad Deadbolt Door Lock" //zw:Fs type:4003 mfr:0090 prod:0003 model:0541 ver:4.79 zwv:4.34 lib:03 cc:5E,72,5A,98,73,7A sec:86,80,62,63,85,59,71,70,5D role:07 ff:8300 ui:8300, Kwikset 888
         
-        fingerprint mfr:"0129", prod:"0002", model:"0000", deviceJoinName:"Yale Real Living Touchscreen Deadbolt"
+        fingerprint mfr:"0129", prod:"0002", model:"0000", deviceJoinName:"Yale Real Living Touchscreen Deadbolt" // zw:L type:4003 mfr:0129 prod:0002 model:0000 cc:72,86,98
         fingerprint mfr:"0129", prod:"0002", model:"FFFF", deviceJoinName:"Yale Real Living Touchscreen Lever Lock"
         fingerprint mfr:"0129", prod:"0001", model:"0000", deviceJoinName:"Yale Real Living Push Button Lever Lock"
         fingerprint mfr:"0129", prod:"0004", model:"0000", deviceJoinName:"Yale Real Living Push Button Deadbolt" // YRD 210
@@ -564,6 +570,9 @@ private identifyLockModel() {
         case "0090-0001-0001": // Kwikset 91x Series
             log.debug "Found Kwikset 91x Lock"
             break
+        case "0090-0003-0845": // Kwikset 913 Z-Wave Plus
+        	log.debug "Found Kwikset 913 Z-Wave Plus Lock"
+        	break
         case "0090-0003-0541": // Kwikset 888 Z-Wave Plus
         	log.debug "Found Kwikset 888 Z-Wave Plus Lock"
         	break
@@ -638,8 +647,8 @@ private getCommandClassVersions() {
 * Called on app installed
 */
 def installed() {
-    // Device-Watch pings if no device events received for 1 hour (checkInterval)
-    sendEvent(name: "checkInterval", value: 1 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+    // Device-Watch pings if no device events received for 6 hours (checkInterval)
+    sendEvent(name: "checkInterval", value: 6 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
     schedule("* 0 */12 * * ?", scheduledPoll) // Poll every 12 hours
 
     if (isSamsungLock()) { // Samsung locks won't allow you to enter the pairing menu when locked, so it must be unlocked
@@ -659,7 +668,7 @@ def installed() {
  * and check again.
  */
 def scheduleInstalledCheck() {
-	runIn(120, installedCheck, [forceForLocallyExecuting: false])
+	runIn(120, installedCheck)
 }
 
 def installedCheck() {
@@ -694,8 +703,8 @@ def uninstalled() {
 */
 def updated() {
     log.trace "Updated called settings: $settings"
-    // Device-Watch pings if no device events received for 1 hour (checkInterval)
-    sendEvent(name: "checkInterval", value: 1 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+    // Device-Watch pings if no device events received for 6 hour (checkInterval)
+    sendEvent(name: "checkInterval", value: 6 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
     schedule("* 0 */12 * * ?", scheduledPoll) // Poll every 12 hours
     def hubAction = null
     
@@ -711,7 +720,7 @@ def updated() {
             cmds << doConfigure()
             cmds << refresh()
             cmds << reloadAllCodes()
-
+            
             hubAction = response(delayBetween(cmds.findAll{it}, 4200)) // Remove all empty/null
         } catch (e) {
             log.warn "updated() threw $e"
@@ -738,9 +747,10 @@ def configure() {
  */
 def doConfigure() {
 	log.trace "[DTH] Executing 'doConfigure()' for device ${device.displayName}"
-	state.configured = true
+
     runIn(60, refresh)
-	def cmds = []
+	
+    def cmds = []
     cmds << configureLock() // Configure lock settings
     cmds << zwave.manufacturerSpecificV2.manufacturerSpecificGet().format() // Some locks only support non secure MSR responses (Schlage)
     cmds << secure(zwave.manufacturerSpecificV2.manufacturerSpecificGet()) // Some locks only support secure MSR responses (August Pro)
@@ -749,6 +759,8 @@ def doConfigure() {
     cmds << getCodeLength()
 	cmds = delayBetween(cmds.findAll{it}, 4200) // Remove the empty/null
     
+    state.configured = true // We are now configured
+
 	//log.debug "Do configure returning with commands := $cmds"
 	cmds
 }
@@ -886,8 +898,11 @@ def zwaveEvent(DoorLockOperationReport cmd) {
 		map.value = "unlocked"
 		map.descriptionText = "Unlocked"
 		if (state.assoc != zwaveHubNodeId) {
-			result << response(secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId)))
-			result << response(zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId))
+			if (isSchlage369() || isSchlage599()) {
+                result << response(zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format())
+            } else {
+                result << response(secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId)))
+            }
 			result << response(secure(zwave.associationV1.associationGet(groupingIdentifier:1)))
 		}
 	}
@@ -1213,13 +1228,24 @@ private def handleBatteryAlarmReport(cmd) {
 	def deviceName = device.displayName
 	def map = null
 	switch(cmd.zwaveAlarmEvent) {
-        case 0x01: //power has been applied, check if the battery level updated
+        case 0x01: // power has been applied, check if the battery level updated
             result << response(getBatteryState())
-            break;
-        case 0x0A:
+            break
+        case 0x09: // Load error
+        	map = [ descriptionText: "Motor load error", data: [ lockName: deviceName ]  ]
+            break
+        case 0x0C: // Battery charging
+        	map = [ descriptionText: "Battery is charging", displayed: true, data: [ lockName: deviceName ] ]
+            break
+        case 0x0D:
+        	map = [ descriptionText: "Battery is fully charged", displayed: true, data: [ lockName: deviceName ] ]
+	        break
+        case 0x0A: // Replace battery soon
+        case 0x0E: // Charge battery soon
 			map = [ name: "battery", value: 1, descriptionText: "Battery level critical", displayed: true, data: [ lockName: deviceName ] ]
 			break
-		case 0x0B:
+		case 0x0B: // Replace battery now
+        case 0x0F: // Charge battery now
 			map = [ name: "battery", value: 0, descriptionText: "Battery too low to operate lock", isStateChange: true, displayed: true, data: [ lockName: deviceName ] ]
 			break
 		default:
@@ -1244,13 +1270,13 @@ private def handleEmergencyAlarmReport(cmd) {
 	def map = null
 	switch(cmd.zwaveAlarmEvent) {
 		case 0x00: // IDLock
-			map = [ descriptionText: "Emergency cleared" ]
+			map = [ descriptionText: "Emergency cleared", data: [ lockName: deviceName ]  ]
 			break
 		case 0x01:
-			map = [ descriptionText: "Contact police" ]
+			map = [ descriptionText: "Contact police", displayed: true, data: [ lockName: deviceName ]  ]
 			break
 		case 0x02: // IDLock
-			map = [ descriptionText: "Contact fire service" ]
+			map = [ descriptionText: "Contact fire service", displayed: true, data: [ lockName: deviceName ]  ]
 			break
 		default:
 			// delegating it to handleAlarmReportUsingAlarmType
@@ -1293,7 +1319,7 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 			break
 		case 16: // Note: for levers this means it's unlocked, for non-motorized deadbolt, it's just unsecured and might not get unlocked
             // Note: Schlage FE599 non motorized deadbolt sends 16 and motorized deadbolts like BE469 send 19. However with non motorized deadbolts it only unsecures the handles and not unlocks, so we need to send a lock event after a few seconds only if it was currently locked
-			if(isSchlageLock() && ("634B" == zwaveInfo.prod && "504C" == zwaveInfo.model) && (device.currentValue("lock") == "locked")) {
+			if ((isSchlage369() || isSchlage599()) && (device.currentValue("lock") == "locked")) {
             	log.trace "Non motorized bolt, resetting unlocked to locked notification in 3 seconds"
 				runIn(3, reLocked) // The bolt resecures after 3 seconds, send the locked event notification
             }
@@ -1376,8 +1402,14 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 				map = [ descriptionText: "DPS Open", displayed: false ]
 			}
 			break
+		case 48: // Schlage factory reset
+			result = allCodesDeletedEvent()
+			map = [ name: "codeChanged", value: "all deleted", descriptionText: "Factory reset, deleted all user codes", isStateChange: true ]
+			map.data = [notify: true, notificationText: "Deleted all user codes in $deviceName at ${location.name}"]
+			result << createEvent(name: "lockCodes", value: util.toJson([:]), displayed: false, descriptionText: "'lockCodes' attribute updated")
+			break
 		case 13:
-		case 112: // Master or user code changed/set
+		case 112: // Master or user code changed/set, Schlage/Kwikset
 			codeID = readCodeSlotId(cmd)
 			if(codeID == 0 && isKwiksetLock()) {
 				//Ignoring this AlarmReport as Kwikset reports codeID 0 when all slots are full and user tries to set another lock code manually
@@ -1404,6 +1436,10 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 			map = [ name: "codeChanged", value: "$codeID failed", descriptionText: "User code is duplicate and not added",
 				isStateChange: true, data: [isCodeDuplicate: true] ]
 			break
+        case 128: // Kwikset keypad power up, get battery level
+        	map = [ descriptionText: "Keypad powered up", displayed: true ]
+            result << response(getBatteryState())
+        	break
 		case 130:  // Batteries replaced (Yale YRD)
 			map = [ descriptionText: "Batteries replaced", isStateChange: true ]
             result << response(getBatteryState())
@@ -1414,24 +1450,28 @@ private def handleAlarmReportUsingAlarmType(cmd) {
 		case 132: // Yale Out of schedule user (valid)
 			map = [ name: "invalidCode", value: "detected", descriptionText: "Out of Schedule user ${cmd.alarmLevel} was entered", isStateChange: true, displayed: true ]
 			break
-		case 144: // Yale unlocked using RFID tag
-			map = [ name: "lock", value: "unlocked" ]
-			if (cmd.alarmLevel > 0) {
-                codeID = readCodeSlotId(cmd)
-				codeName = getCodeName(lockCodes, codeID)
-				map.descriptionText = "Unlocked by \"$codeName\""
-				map.data = [ codeId: codeID as String, usedCode: codeID, codeName: codeName, method: "rfid" ]
-			} else {
-				map.descriptionText = "Unlocked manually"
-				map.data = [ method: "rfid" ]
-			}
+		case 144: // Yale unlocked using RFID tag, Schlage FE599/BE369 lock is busy
+			if (isSchlage369() || isSchlage599()) {
+                map = [ descriptionText: (cmd.alarmLevel ? "Lock is busy" : "Lock is ready") ]
+            } else {
+                map = [ name: "lock", value: "unlocked" ]
+                if (cmd.alarmLevel > 0) {
+                    codeID = readCodeSlotId(cmd)
+                    codeName = getCodeName(lockCodes, codeID)
+                    map.descriptionText = "Unlocked by \"$codeName\""
+                    map.data = [ codeId: codeID as String, usedCode: codeID, codeName: codeName, method: "rfid" ]
+                } else {
+                    map.descriptionText = "Unlocked manually"
+                    map.data = [ method: "rfid" ]
+                }
+            }
 			break
-		case 96: // Schlage FE599 (alarmType 96, alarmLevel 255)
+		case 96: // Schlage FE599/BE369 (alarmType 96, alarmLevel 255 -> keypad temporarily disabled)
 		case 161: // Tamper Alarm
 			if (cmd.alarmLevel == 2) {
 				map = [ name: "tamper", value: "detected", descriptionText: "Front escutcheon removed", isStateChange: true ]
 				runIn(60, resetTamper) // Clear tamper after 60 seconds, since tamper clear is never sent by a lock
-			} else if (cmd.alarmLevel == 1) {
+			} else if (cmd.alarmLevel == 1) { // Schlage
 				map = [ name: "invalidCode", value: "detected", descriptionText: "Keypad attempts exceed code entry limit", isStateChange: true, displayed: true ]
 			} else if (cmd.alarmLevel == 3) {
 				map = [ name: "tamper", value: "detected", descriptionText: "Handle open detected", isStateChange: true, displayed: true ] // Yale 6th gen Keyfree lock Handle Alarm
@@ -1653,13 +1693,13 @@ def zwaveEvent(physicalgraph.zwave.commands.associationv2.AssociationReport cmd)
 		state["associationQuery"] = null
 		result << createEvent(descriptionText: "Is associated")
 		state.assoc = zwaveHubNodeId
-		if (cmd.groupingIdentifier == 2) {
-			result << response(zwave.associationV1.associationRemove(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+		if (cmd.groupingIdentifier == 2) { // BE369/FE599 needs controllers in group 2
+			result << response(zwave.associationV1.associationRemove(groupingIdentifier:1, nodeId:zwaveHubNodeId).format())
 		}
 	} else if (cmd.groupingIdentifier == 1) {
 		result << response(secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId)))
 	} else if (cmd.groupingIdentifier == 2) {
-		result << response(zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId))
+		result << response(zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format())
 	}
 	result
 }
@@ -1700,10 +1740,10 @@ def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicSet cmd) {
 	def result = [ createEvent(name: "lock", value: cmd.value ? "unlocked" : "locked") ]
 	def cmds = [
 			zwave.associationV1.associationRemove(groupingIdentifier:1, nodeId:zwaveHubNodeId).format(),
-			"delay 1200",
 			zwave.associationV1.associationGet(groupingIdentifier:2).format()
 	]
-	[result, response(cmds)]
+	result << response(delayBetween(cmds, 2200))
+    result
 }
 
 /**
@@ -1875,7 +1915,7 @@ def refresh() {
     identifyLockModel()
 
     if (!device.currentValue("checkInterval")) { // If the user updated the device handler
-        sendEvent(name: "checkInterval", value: 1 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+        sendEvent(name: "checkInterval", value: 6 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
     }
     if (!device.currentValue("smoke")?.trim()) { // If the smoke/fire sensor state isn't defined then lets define it to report it correctly in SHM
         resetSmoke()
@@ -1888,8 +1928,11 @@ def refresh() {
 		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
 		state.associationQuery = now()
 	} else if (now() - state.associationQuery.toLong() > 9000) {
-		cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
-		cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+        if (isSchlage369() || isSchlage599()) {
+            cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
+        } else {
+            cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+        }
 		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()
 		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
 		state.associationQuery = now()
@@ -1946,7 +1989,7 @@ def scheduledPoll() {
  */
 def poll() {
     if (!device.currentValue("checkInterval")) { // If the user updated the device handler
-        sendEvent(name: "checkInterval", value: 1 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
+        sendEvent(name: "checkInterval", value: 6 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"])
     }
 
     if (!device.currentValue("smoke")?.trim()) { // If the smoke/fire sensor state isn't defined then lets define it to report it correctly in SHM
@@ -1965,8 +2008,11 @@ def poll() {
     // Only check lock state if it changed recently or we haven't had an update in an hour
     def latest = device.currentState("lock")?.date?.time
     if (state.assoc != zwaveHubNodeId && secondsPast(state.associationQuery, 19 * 60)) {
-		cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
-		cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+        if (isSchlage369() || isSchlage599()) {
+            cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
+        } else {
+            cmds << secure(zwave.associationV1.associationSet(groupingIdentifier:1, nodeId:zwaveHubNodeId))
+        }
 		cmds << zwave.associationV1.associationGet(groupingIdentifier:2).format()
 		cmds << secure(zwave.associationV1.associationGet(groupingIdentifier:1))
 		state.associationQuery = now()
@@ -2364,8 +2410,8 @@ private secure(physicalgraph.zwave.Command cmd) {
  *
  * @returns The encapsulated commands
  */
-private secureSequence(commands, delay=4200) {
-	delayBetween(commands.collect{ secure(it) }, delay)
+private secureSequence(commands, delay=0) {
+	delay ? delayBetween(commands.collect{ secure(it) }, delay) : commands.collect{ secure(it) }
 }
 
 /**
@@ -3067,6 +3113,25 @@ private kwiksetConfigurationReport(cmd) {
                     break
             }
             map.descriptionText = "Status LED ${map.value}"
+            results << createEvent(map)
+            break
+            
+            
+        case kwiksetRemoteParamMap.MotorLoadControl.Param: // Remote config
+            map = []
+            switch (cmd.configurationValue[0]) {
+                case kwiksetRemoteParamMap.MotorLoadControl.Disabled:
+                    map.value = "disabled"
+                    break
+                case kwiksetRemoteParamMap.MotorLoadControl.Enabled:
+                    map.value = "enabled"
+                    break
+                default:
+                    map.value = "unknown"
+                    map.displayed = false
+                    break
+            }
+            map.descriptionText = "Status Motor Load Control ${map.value}"
             results << createEvent(map)
             break
 
@@ -4434,7 +4499,7 @@ private keyWeConfigureLock() {
     log.trace "Configure KeyWe lock settings"
     def cmds = []
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 private poppConfigureKeypad() {
@@ -4445,7 +4510,7 @@ private poppConfigureKeypad() {
     cmds << zwave.configurationV1.configurationSet(parameterNumber: poppParamMap.ReportUserCodes.Param, configurationValue: [poppParamMap.ReportUserCodes.Enabled])
     cmds << zwave.configurationV1.configurationGet(parameterNumber: poppParamMap.ReportUserCodes.Param)
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 private yaleConfigureLock() {
@@ -4512,21 +4577,31 @@ private yaleConfigureLock() {
     cmds << zwave.configurationV1.configurationGet(parameterNumber: 21)
     
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 private kwiksetConfigureLock() {
     log.trace "Configure Kwikset settings"
     def cmds = []
+    
+    log.info "Enabling motor load control"
+    cmds << zwave.configurationV1.configurationSet(parameterNumber: kwiksetRemoteParamMap.MotorLoadControl.Param, configurationValue: [ kwiksetRemoteParamMap.MotorLoadControl.Enabled ])
+    cmds << zwave.configurationV1.configurationGet(parameterNumber: kwiksetRemoteParamMap.MotorLoadControl.Param)
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 private schlageConfigureLock() {
     log.trace "Configure Schlage settings"
     def cmds = []
 
-    cmds ? secureSequence(cmds, 5000) : null
+    if (isSchlage369() || isSchlage599()) { // These models need to use only Group 2 using non encapsulated commands to get unsolicited reports/notifications, remove Group 1 as it sends BasicSet
+        log.debug "Found FE599/BE369, correcting association groups"
+        cmds << zwave.associationV1.associationSet(groupingIdentifier:2, nodeId:zwaveHubNodeId).format()
+        cmds << zwave.associationV1.associationRemove(groupingIdentifier:1, nodeId:zwaveHubNodeId).format()
+    }
+    
+    cmds
 }
 
 private idLockConfigureLock() {
@@ -4559,7 +4634,7 @@ private idLockConfigureLock() {
     cmds << zwave.configurationV1.configurationSet(parameterNumber: idLockParamMap.RelockMode.Param, configurationValue: [ idlockRelock ? idLockParamMap.RelockMode.Enabled : idLockParamMap.RelockMode.Disabled ])
     cmds << zwave.configurationV1.configurationGet(parameterNumber: idLockParamMap.RelockMode.Param)
 
-    cmds ? delayBetween(cmds.collect { it.format() }, 5000) : null // IDLock uses non secure channel for configuration class
+    cmds // IDLock uses non secure channel for configuration class
 }
 
 private danaLockConfigureLockV3() {
@@ -4592,7 +4667,7 @@ private danaLockConfigureLockV3() {
         cmds << zwave.configurationV1.configurationGet(parameterNumber: danalockV3ParamMap.TurnAndGo.Param)
     }
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 private danaLockConfigureLockV2() {
@@ -4636,7 +4711,7 @@ private danaLockConfigureLockV2() {
         }
     }
 
-    cmds ? secureSequence(cmds, 5000) : null
+    cmds ? secureSequence(cmds) : []
 }
 
 def reLocked() {
@@ -4671,16 +4746,26 @@ def setContactState(String position, String msg) {
 }
 
 private createChildDevices() {
-    def physicalHubs = location.hubs.findAll { it.type == physicalgraph.device.HubType.PHYSICAL } // Ignore Virtual hubs
-    def hub = physicalHubs[0]
     def childDevs = childDevices
 
     if (!childDevs) {
-        log.info "Adding child device contact sensor"
-        def childDevice = addChildDevice("smartthings", "Child Contact Sensor", "${device.deviceNetworkId}-sensor", hub.id,
-                       [completedSetup: true, label: "${device.displayName} Contact Sensor",
-                        isComponent: !separateDevices, componentName: "sensor", componentLabel: "Contact Sensor"])
-        childDevice.sendEvent([ name: "contact", value: "closed", descriptionText: "$childDevice.displayName Resetting contact sensor", displayed: true ]) // Reset the state
+        try {
+            log.info "Adding child device contact sensor"
+            def childDevice = addChildDevice(
+                "smartthings",
+                "Child Contact Sensor",
+                "${device.deviceNetworkId}-sensor",
+                device.hub.id,
+                [
+                    completedSetup: true,
+                    label: "${device.displayName} Contact Sensor",
+                    isComponent: !separateDevices
+                ] + (!separateDevices ? [ componentName: "sensor", componentLabel: "Contact Sensor" ] : [:]) // Don't set this for isComponent is false
+            )
+            childDevice.sendEvent([ name: "contact", value: "closed", descriptionText: "$childDevice.displayName Resetting contact sensor", displayed: true ]) // Reset the state
+        } catch(Exception e) {
+            log.error "Unable to create child devices: ${e}"
+        }
     } else {
         log.trace "Installed child device: $childDevs"
     }
@@ -4689,7 +4774,7 @@ private createChildDevices() {
 // PARENT INTERFACES
 def configureChild() {
     log.trace "Configuring child called"
-    childDevices*.sendEvent(name: "checkInterval", value: 1 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"]) // Setup health check
+    childDevices*.sendEvent(name: "checkInterval", value: 6 * 60 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID, offlinePingable: "1"]) // Setup health check
 }
 
 def refreshChild() {
@@ -4711,6 +4796,36 @@ def deleteChild() {
  */
 def isSchlageLock() {
 	if (state.MSR?.startsWith("003B") || ("003B" == zwaveInfo.mfr)) {
+		if ("Schlage" != getDataValue("manufacturer")) {
+			updateDataValue("manufacturer", "Schlage")
+		}
+		return true
+	}
+	return false
+}
+
+/**
+ * Utility function to check if the lock manufacturer is Schlage and Model FE599
+ *
+ * @return true if the lock FE599, else false
+ */
+def isSchlage599() {
+    if (isSchlageLock() && ("634B" == zwaveInfo.prod) && ("504C" == zwaveInfo.model)) {
+		if ("Schlage" != getDataValue("manufacturer")) {
+			updateDataValue("manufacturer", "Schlage")
+		}
+		return true
+	}
+	return false
+}
+
+/**
+ * Utility function to check if the lock manufacturer is Schlage and Model BE369
+ *
+ * @return true if the lock is BE369, else false
+ */
+def isSchlage369() {
+    if (isSchlageLock() && ("634B" == zwaveInfo.prod) && ("5044" == zwaveInfo.model)) {
 		if ("Schlage" != getDataValue("manufacturer")) {
 			updateDataValue("manufacturer", "Schlage")
 		}
@@ -5117,6 +5232,7 @@ private getKwiksetRemoteParamMap(value = null) {
         "LED": 					[ Param: 35, Size: 1, Default: 1, Enabled: 1, Disabled: 0 ],
         "AutoLock": 			[ Param: 36, Size: 2, Default: 7680, Min: 0, Max: 65535, Value: reverseValue(value) ].with { put('ParamValue', paramValue(value, get('Size'))); it }, // 1st byte enable/disable autolock, 2nd byte timer 30(default)/60/90/120/180
         "Audio": 				[ Param: 37, Size: 1, Default: 1, Enabled: 1, Disabled: 0 ],
+        "MotorLoadControl":		[ Param: 47, Size: 1, Default: 0, Enabled: 1, Disabled: 0 ],
     ]
 }
 
