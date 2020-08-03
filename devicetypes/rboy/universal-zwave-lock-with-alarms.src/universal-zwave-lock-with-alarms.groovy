@@ -21,7 +21,7 @@
 */ 
 
 def clientVersion() {
-    return "04.07.00"
+    return "04.07.02"
 }
 
 /*
@@ -29,6 +29,8 @@ def clientVersion() {
 * Works with all Z-Wave Locks including Schlage, Yale, Kiwkset, Monoprice, DanaLock, IDLock, Samsung, KeyWe, Delaney, Popp and August
 *
 * Change Log
+* 2020-07-07 - (v04.07.02) Added more Schlage models JxE109 series
+* 2020-06-16 - (v04.07.01) Fix for IDLock pairing issue, renamed codeunlock to keypad and beeper to audio
 * 2020-06-05 - (v04.07.00) Fix bugs with stock DTH associations and also fix for FE599/BE369 associations starting hub firmware 0.31.x
 * 2020-04-06 - (v04.06.07) Handle FE599 lock busy reports, enable motor load control for Kwikset, additional report handling
 * 2020-02-27 - (v04.06.06) Handle multiple hub installations and component rule actions better
@@ -181,11 +183,11 @@ metadata {
 
         attribute "alarm", "string"
         attribute "sensitive", "string"
-        attribute "codeunlock", "string"
+        attribute "keypad", "string"
         attribute "autolock", "string"
         attribute "lockStatus", "string"
         attribute "invalidCode", "string"
-        attribute "beeper", "string"
+        attribute "audio", "string"
         attribute "maxPINLength", "number"
         attribute "minPINLength", "number"
         //attribute "codeLength", "number" // TODO: Do we need to define this or is this automatically done now with the new DTH capability
@@ -237,6 +239,8 @@ metadata {
         fingerprint mfr:"003B", prod:"6341", model:"4044", deviceJoinName:"Schlage Touchscreen Deadbolt BE469IR Z-Wave Lock"
         fingerprint mfr:"003B", prod:"0001", model:"0468", deviceJoinName: "Schlage Connect Smart Deadbolt Door Lock (BE468ZP)" //BE468ZP
         fingerprint mfr:"003B", prod:"0001", model:"0469", deviceJoinName: "Schlage Connect Smart Deadbolt Door Lock (BE469ZP)" //BE469ZP, zw:Fs type:4003 mfr:003B prod:0001 model:0469 ver:3.03 zwv:6.03 lib:06 cc:5E,98,9F,55,6C,8A,22 sec:5D,85,70,80,62,71,63,4E,8A,6C,72,86,7A,22,59,5A,73 role:07 ff:8300 ui:8300
+        fingerprint mfr:"003B", prod:"0004", model:"2109", deviceJoinName: "Schlage Door Lock" //Schlage Keypad Deadbolt JBE109
+        fingerprint mfr:"003B", prod:"0004", model:"6109", deviceJoinName: "Schlage Door Lock" //Schlage Keypad Lever JFE109
         
         fingerprint mfr:"0090", prod:"0001", model:"0642", deviceJoinName:"Kwikset 916 Z-Wave Lock"
         fingerprint mfr:"0090", prod:"0001", model:"0436", deviceJoinName:"Kwikset 914 Z-Wave Lock"
@@ -392,7 +396,7 @@ metadata {
             state "disabled", label:'Touch Lock', action:"enableOneTouchLock", icon:"https://www.rboyapps.com/images/ManualControlOff.png", nextState:"working"
             state "working", label:'...', icon:"https://www.rboyapps.com/images/ManualControlWorking.png", backgroundColor:"#cccccc"
         }
-        standardTile("codeunlock", "device.codeunlock", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
+        standardTile("keypad", "device.keypad", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
             state "unknown", label:'', icon:"", backgroundColor:"#ffffff", nextState:"working", defaultState: true
             state "enabled", label:'Code Entry On', action:"disableKeypad", icon:"st.unknown.zwave.remote-controller", backgroundColor:"#ffffff", nextState:"working"
             state "disabled", label:'Code Off', action:"enableKeypad", icon:"st.unknown.zwave.remote-controller", backgroundColor:"#00a0dc", nextState:"working"
@@ -404,7 +408,7 @@ metadata {
             state "disabled", label:'AutoLock Off', action:"enableAutolock", icon:"st.contact.contact.closed", nextState:"working"
             state "working", label:'...', icon:"st.contact.contact.closed", backgroundColor:"#cccccc"
         }
-        standardTile("beeper", "device.beeper", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
+        standardTile("audio", "device.audio", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
             state "unknown", label:'', icon:"", backgroundColor:"#ffffff", nextState:"workingoff", defaultState: true
             state "enabled", label:'Audio On', action:"disableAudio", icon:"st.quirky.spotter.quirky-spotter-sound-on", backgroundColor:"#ffffff", nextState:"workingon"
             state "disabled", label:'Audio Off', action:"enableAudio", icon:"st.quirky.spotter.quirky-spotter-sound-off", nextState:"workingoff"
@@ -447,7 +451,7 @@ metadata {
         }
 
         main "toggle"
-        details(["toggle", "lock", "unlock", "codeunlock", "autolock", "beeper", "onetouchlock", "alarm", "sensitive", "battery", "tamper", "smoke", "refresh", "contact"])
+        details(["toggle", "lock", "unlock", "keypad", "autolock", "audio", "onetouchlock", "alarm", "sensitive", "battery", "tamper", "smoke", "refresh", "contact"])
     }
 }
 
@@ -509,6 +513,12 @@ private identifyLockModel() {
             break
         case "003B-0001-0469": // Schlage BE469 ZWave Plus
             log.debug "Found Schlage BE469ZP"
+            break
+        case "003B-0004-2109":
+            log.debug "Found Schlage JBE109"
+            break
+        case "003B-0004-6109":
+            log.debug "Found Schlage JFE109"
             break
         case "0129-8008-0A00": // YALE NEXTOUCH AUR-NTM-62
         	log.debug "Found YALE NEXTOUCH AUR-NTM-62"
@@ -672,6 +682,7 @@ def scheduleInstalledCheck() {
 }
 
 def installedCheck() {
+    log.trace "Installed check called"
 	if (device.currentState("lock") && device.currentState("battery")) {
 		unschedule("installedCheck")
 	} else {
@@ -2712,7 +2723,7 @@ private poppConfigurationReport(cmd) {
             break
 
         case poppParamMap.Buzzer.Param:
-            map = [name: "beeper"]
+            map = [name: "audio"]
             switch (cmd.scaledConfigurationValue) {
                 case poppParamMap.Buzzer.Enabled:
                     map.value = "enabled"
@@ -2745,7 +2756,7 @@ private samsungConfigurationReport(cmd) {
 
     switch (cmd.parameterNumber) {
         case samsungParamMap.PrivacyMode.Param: // Privacy mode enabled -> Keypad disabled and vice versa
-            map = [name: "codeunlock"]
+            map = [name: "keypad"]
             switch (cmd.scaledConfigurationValue) {
                 case samsungParamMap.PrivacyMode.Disabled:
                     map.value = "enabled"
@@ -2855,7 +2866,7 @@ private danaLockConfigurationReportV2(cmd) {
             break
 
         case 6:
-        	map = [name: "beeper"]
+        	map = [name: "audio"]
             switch (cmd.configurationValue[0]) {
                 case 0:
                     map.value = "disabled"
@@ -2932,7 +2943,7 @@ private idLockConfigurationReport(cmd) {
 
                 default:
                     // Away Mode
-                    map = [name: "codeunlock"]
+                    map = [name: "keypad"]
                     if (cmd.configurationValue[0] & 0x2) { // Away Mode enabled = Keypad disable
                         map.value = "disabled"
                         map.descriptionText = "Activated Away mode, Keypad ${map.value}"
@@ -2982,7 +2993,7 @@ private idLockConfigurationReport(cmd) {
 
         case idLockParamMap.AudioVolumeLevel.Param:
         	def level = ""
-        	map = [name: "beeper"]
+        	map = [name: "audio"]
             switch (getIdLockParamMap(cmd.configurationValue).AudioVolumeLevel.Value) {
                 case 0:
                     map.value = "disabled"
@@ -3041,9 +3052,9 @@ private kwiksetConfigurationReport(cmd) {
         // Bit 2 Auto Buzzer (1: enable)
         // Bit 3 Secure Screen (1: enable) *Only for MB 916
         case 31:
-            // Beeper
-            map = [name: "beeper"]
-            if (cmd.configurationValue[0] & 0x4) { // Beeper
+            // audio
+            map = [name: "audio"]
+            if (cmd.configurationValue[0] & 0x4) { // audio
                 map.value = "enabled"
             } else {
                 map.value = "disabled"
@@ -3081,7 +3092,7 @@ private kwiksetConfigurationReport(cmd) {
         	break
 
         case kwiksetRemoteParamMap.Audio.Param: // Remote config
-            map = [name: "beeper"]
+            map = [name: "audio"]
             switch (cmd.configurationValue[0]) {
                 case kwiksetRemoteParamMap.Audio.Disabled:
                     map.value = "disabled"
@@ -3150,8 +3161,8 @@ private yaleConfigurationReport(cmd) {
     def map = null
 
     switch (cmd.parameterNumber) {
-        case 1: // Beeper, Assa Abloy and Yale have it in reverse to each other
-            map = [name: "beeper"]
+        case 1: // audio, Assa Abloy and Yale have it in reverse to each other
+            map = [name: "audio"]
             switch (state.MSR) {
                 case ~/0129-80.*/: // Commercial
                     switch (cmd.configurationValue[0]) {
@@ -3235,7 +3246,7 @@ private yaleConfigurationReport(cmd) {
             break
 
         case 8: // Vacation mode enabled -> Keypad disabled and vice versa
-            map = [name: "codeunlock"]
+            map = [name: "keypad"]
             switch (cmd.configurationValue[0]) {
                 case 0: // normal
                     map.value = "enabled"
@@ -3387,8 +3398,8 @@ private schlageConfigurationReport(cmd) {
     def result = []
 
     switch (cmd.parameterNumber) {
-        case 0x03: // Beeper
-            map = [name: "beeper"]
+        case 0x03: // audio
+            map = [name: "audio"]
             switch (cmd.configurationValue[0]) {
                 case 0:
                     map.value = "disabled"
@@ -3411,7 +3422,7 @@ private schlageConfigurationReport(cmd) {
             break
 
         case 0x04: // Vacation mode enabled -> Keypad disabled and vice versa
-            map = [name: "codeunlock"]
+            map = [name: "keypad"]
             switch (cmd.configurationValue[0]) {
                 case 0:
                     map.value = "enabled"
@@ -3579,7 +3590,7 @@ private getKeypadState() {
         parameter = samsungParamMap.PrivacyMode.Param
     } else {
         log.warn "Unknown device with MSR $state.MSR, keypad state not available"
-        sendEvent(name: "codeunlock", value: "", displayed: false) // Not supported
+        sendEvent(name: "keypad", value: "", displayed: false) // Not supported
         return
     }
 
@@ -3589,7 +3600,7 @@ private getKeypadState() {
 def enableKeypad() {
     log.debug "Enabling keypad"
 
-    if (!(device.currentValue('codeunlock') && (device.currentValue('codeunlock') != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
+    if (!(device.currentValue("keypad") && (device.currentValue("keypad") != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
         log.warn "Device with MSR $state.MSR, Keypad enable feature not available"
         sendEvent(name: "contactDeveloper", value: "Feature not supported, MSR $state.MSR", isStateChange: true, displayed: true) // Report to dev with MSR
         return
@@ -3641,7 +3652,7 @@ def enableKeypad() {
 def disableKeypad() {
     log.debug "Disabling keypad"
 
-    if (!(device.currentValue('codeunlock') && (device.currentValue('codeunlock') != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
+    if (!(device.currentValue("keypad") && (device.currentValue("keypad") != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
         log.warn "Device with MSR $state.MSR, Keypad disable feature not available"
         sendEvent(name: "contactDeveloper", value: "Feature not supported, MSR $state.MSR", isStateChange: true, displayed: true) // Report to dev with MSR
         return
@@ -3738,7 +3749,7 @@ private getAudioState() {
         parameter = idLockParamMap.AudioVolumeLevel.Param
     } else {
         log.warn "Unknown device with MSR $state.MSR, Audio/Beeper feature not available"
-        sendEvent(name: "beeper", value: "", displayed: false) // Not supported
+        sendEvent(name: "audio", value: "", displayed: false) // Not supported
         return
     }
 
@@ -3748,7 +3759,7 @@ private getAudioState() {
 def enableAudio() {
     log.debug "Enabling audio/beeper" 
 
-    if (!(device.currentValue('beeper') && (device.currentValue('beeper') != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
+    if (!(device.currentValue("audio") && (device.currentValue("audio") != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
         log.warn "Device with MSR $state.MSR, Audio/Beeper feature not available"
         sendEvent(name: "contactDeveloper", value: "Audio/Beeper feature not supported, MSR $state.MSR", isStateChange: true, displayed: true) // Report to dev with MSR
         return
@@ -3829,7 +3840,7 @@ def enableAudio() {
 def disableAudio() {
     log.debug "Disabling audio/beeper" 
 
-    if (!(device.currentValue('beeper') && (device.currentValue('beeper') != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
+    if (!(device.currentValue("audio") && (device.currentValue("audio") != "unknown"))) { // Check if we have succesfully managed to read the feature state, if not then it isn't supported
         log.warn "Device with MSR $state.MSR, Audio/Beeper feature not available"
         sendEvent(name: "contactDeveloper", value: "Audio/Beeper feature not supported, MSR $state.MSR", isStateChange: true, displayed: true) // Report to dev with MSR
         return
@@ -4043,9 +4054,9 @@ def enableAutolock() {
     } else if (isIDLock()) { // IDLock
         security = false // ID Lock uses non secure channel for configuration class
         parameter = idLockParamMap.DoorLockMode.Param
-        if (device.currentValue("codeunlock") == "enabled") { // Away mode enabled = keypad disabled
+        if (device.currentValue("keypad") == "enabled") { // Away mode enabled = keypad disabled
             value = [0x0 | 0x1] // Bit 1 AutoLock, Bit 2 Away mode
-        } else if (device.currentValue("codeunlock") == "disabled") {
+        } else if (device.currentValue("keypad") == "disabled") {
             value = [0x2 | 0x1] // Bit 1 AutoLock, Bit 2 Away mode
         } else {
             log.error "IDLock device with MSR $state.MSR, cannot determine Away mode state, not enabling AutoLock"
@@ -4107,9 +4118,9 @@ def disableAutolock() {
     } else if (isIDLock()) { // IDLock
         security = false // ID Lock uses non secure channel for configuration class
         parameter = idLockParamMap.DoorLockMode.Param
-        if (device.currentValue("codeunlock") == "enabled") { // Away mode enabled = keypad disabled
+        if (device.currentValue("keypad") == "enabled") { // Away mode enabled = keypad disabled
             value = [0x0 | 0x0] // Bit 1 AutoLock, Bit 2 Away mode
-        } else if (device.currentValue("codeunlock") == "disabled") {
+        } else if (device.currentValue("keypad") == "disabled") {
             value = [0x2 | 0x0] // Bit 1 AutoLock, Bit 2 Away mode
         } else {
             log.error "IDLock device with MSR $state.MSR, cannot determine Away mode state, not disabling AutoLock"
@@ -4517,7 +4528,7 @@ private yaleConfigureLock() {
     log.trace "Configure Yale settings"
     def cmds = []
 
-    if (device.currentValue('beeper') == "enabled") {
+    if (device.currentValue("audio") == "enabled") {
         log.info "Audio enabled, updating audio volume level to ${yaleAudioLevelLow ? "low" : "high"}"
         def value = []
         switch (state.MSR) {
@@ -4615,7 +4626,7 @@ private idLockConfigureLock() {
     }
 
     // The lock won't report the audio state until it's been initialized atleast once
-    if (!device.currentValue('beeper') || (device.currentValue('beeper') == "unknown") || (device.currentValue('beeper') == "enabled")) {
+    if (!device.currentValue("audio") || (device.currentValue("audio") == "unknown") || (device.currentValue("audio") == "enabled")) {
         def value = ((idlockVolume as Integer) && ((idlockVolume as Integer) >= idLockParamMap.AudioVolumeLevel.Min && (idlockVolume as Integer) <= idLockParamMap.AudioVolumeLevel.Max)) ? getIdLockParamMap(idlockVolume as Integer).AudioVolumeLevel.ParamValue : [idLockParamMap.AudioVolumeLevel.Default]
         log.info "Setting IDLock volume level -> ${value}"
         cmds << zwave.configurationV1.configurationSet(parameterNumber: idLockParamMap.AudioVolumeLevel.Param, configurationValue: value)
@@ -4634,7 +4645,7 @@ private idLockConfigureLock() {
     cmds << zwave.configurationV1.configurationSet(parameterNumber: idLockParamMap.RelockMode.Param, configurationValue: [ idlockRelock ? idLockParamMap.RelockMode.Enabled : idLockParamMap.RelockMode.Disabled ])
     cmds << zwave.configurationV1.configurationGet(parameterNumber: idLockParamMap.RelockMode.Param)
 
-    cmds // IDLock uses non secure channel for configuration class
+    cmds ? cmds.collect { it.format() } : [] // IDLock uses non secure channel for configuration class
 }
 
 private danaLockConfigureLockV3() {
